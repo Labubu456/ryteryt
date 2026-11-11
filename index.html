@@ -1,0 +1,80 @@
+<script>
+const { createFFmpeg, fetchFile } = FFmpeg;
+let ffmpeg = null;
+
+function setStatus(text, pct) {
+  document.getElementById('statusBox').classList.remove('hidden');
+  document.getElementById('statusText').textContent = text;
+  if (pct !== undefined) document.getElementById('progressBar').style.width = pct + '%';
+}
+
+async function loadFFmpegEngine() {
+  if (ffmpeg && ffmpeg.isLoaded()) return;
+  setStatus('Memuat engine FFmpeg...', 5);
+  ffmpeg = createFFmpeg({
+    log: true,
+    corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+  });
+  ffmpeg.setProgress(({ ratio }) => {
+    setStatus('Memproses video...', Math.min(100, Math.round(ratio * 100)));
+  });
+  await ffmpeg.load();
+}
+
+async function processVideo() {
+  const file = document.getElementById('videoFile').files[0];
+  if (!file) return alert('Pilih file video dulu.');
+
+  const btn = document.getElementById('processBtn');
+  btn.disabled = true;
+
+  try {
+    await loadFFmpegEngine();
+
+    const device   = document.getElementById('metaDevice').value.trim();
+    const time     = document.getElementById('metaTime').value;
+    const camera   = document.getElementById('metaCamera').value.trim();
+    const location = document.getElementById('metaLocation').value.trim();
+    const tech     = document.getElementById('metaTech').value.trim();
+    const iphone   = document.getElementById('metaIphone').value.trim();
+    const outName  = (document.getElementById('outFileName').value.trim() || 'output') + '.mp4';
+
+    ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(file));
+
+    const args = ['-i', 'input.mp4', '-map_metadata', '-1', '-c', 'copy'];
+    const addMeta = (k, v) => { if (v) args.push('-metadata', `${k}=${v}`); };
+
+    if (device) {
+      addMeta('com.apple.quicktime.model', device);
+      addMeta('com.apple.quicktime.make', device.split(' ')[0]);
+    }
+    if (time)     addMeta('creation_time', new Date(time).toISOString());
+    if (camera)   addMeta('comment', camera);
+    if (location) { addMeta('location', location); addMeta('location-eng', location); }
+    if (tech)     addMeta('encoder', tech);
+    if (iphone)   addMeta('com.apple.quicktime.software', iphone);
+
+    args.push('-movflags', 'use_metadata_tags', '-fflags', '+bitexact', 'output.mp4');
+
+    setStatus('Memproses video...', 10);
+    await ffmpeg.run(...args);
+
+    const data = ffmpeg.FS('readFile', 'output.mp4');
+    const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = outName;
+    a.click();
+
+    ffmpeg.FS('unlink', 'input.mp4');
+    ffmpeg.FS('unlink', 'output.mp4');
+    setStatus('Selesai! File sudah diunduh.', 100);
+  } catch (err) {
+    console.error(err);
+    setStatus('Error: ' + err.message, 0);
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
